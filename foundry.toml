@@ -1,0 +1,29 @@
+[profile.default]
+src = 'contracts'
+out = 'foundry/out'
+test = 'foundry/test'
+libs = ['foundry/lib']
+broadcast = 'foundry/broadcast'
+solc = "0.8.18"
+
+remappings = [
+    "@openzeppelin/=foundry/lib/openzeppelin-contracts/",
+    "@forge=foundry/lib/forge-std/",
+    "@libs/=foundry/lib/"
+]
+
+[invariant]
+fail_on_revert = false
+runs = 5      # Number of runs of the each invariant test session
+depth = 1000     # How many calls to the contract can be made in each invariant session
+
+[rpc_endpoints]
+sepolia = "${SEPOLIA_RPC_URL}"
+
+[etherscan]
+seplolia = { key = "${ETHERSCAN_API_KEY}" }
+
+
+#gas_reports = ["BareStaking"]
+
+# See more config options https://github.com/foundry-rs/foundry/tree/master/config
