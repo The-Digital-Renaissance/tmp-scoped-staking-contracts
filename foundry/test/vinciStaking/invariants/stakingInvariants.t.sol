@@ -115,7 +115,7 @@ contract StakingV1Invariants is Test {
 
     function invariant_penaltyPotElegibleSupply() public {
         assertApproxEqAbs(
-            vinciStaking.getSupplyElegibleForPenaltyPot(),
+            vinciStaking.getSupplyEligibleForPenaltyPot(),
             handler.penaltyPotElegibleSupply(),
             vinciStaking.PENALTYPOT_ROUNDING_FACTOR()
         );

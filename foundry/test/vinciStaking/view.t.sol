@@ -111,12 +111,12 @@ contract TestViewFunctions is BaseTestFunded {
         vinciStaking.crossCheckpoint();
 
         assertGt(vinciStaking.penaltyPot(), 0);
-        assertGt(vinciStaking.getSupplyElegibleForPenaltyPot(), 0);
+        assertGt(vinciStaking.getSupplyEligibleForPenaltyPot(), 0);
         assertEq(vinciStaking.getUnclaimableFromPenaltyPot(alice), 0);
         assertApproxEqRel(
             vinciStaking.estimatedShareOfPenaltyPot(alice),
             vinciStaking.penaltyPot() * vinciStaking.activeStaking(alice)
-                / vinciStaking.getSupplyElegibleForPenaltyPot(),
+                / vinciStaking.getSupplyEligibleForPenaltyPot(),
             vinciStaking.PENALTYPOT_ROUNDING_FACTOR()
         );
 

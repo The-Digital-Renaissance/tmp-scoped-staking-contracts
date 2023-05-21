@@ -340,13 +340,13 @@ contract TestPenaltyPot is BasePenaltyPotTests {
 
         uint256 staked = vinciStaking.activeStaking(randomguy);
         assert(!vinciStaking.isSuperstaker(randomguy));
-        uint256 elegibleSupplyBefore = vinciStaking.getSupplyElegibleForPenaltyPot();
+        uint256 elegibleSupplyBefore = vinciStaking.getSupplyEligibleForPenaltyPot();
 
         skip(181 days);
         vm.prank(randomguy);
         vinciStaking.crossCheckpoint();
 
-        assertEq(vinciStaking.getSupplyElegibleForPenaltyPot(), elegibleSupplyBefore + staked);
+        assertEq(vinciStaking.getSupplyEligibleForPenaltyPot(), elegibleSupplyBefore + staked);
     }
 
     function testAdditionToEleigbleSupplyWhenSuperStakerStakesAgain(uint256 extraStake) public {
@@ -354,7 +354,7 @@ contract TestPenaltyPot is BasePenaltyPotTests {
         vm.prank(user);
         vinciStaking.crossCheckpoint();
 
-        uint256 elegibleSupplyBefore = vinciStaking.getSupplyElegibleForPenaltyPot();
+        uint256 elegibleSupplyBefore = vinciStaking.getSupplyEligibleForPenaltyPot();
 
         extraStake = bound(extraStake, 1, vinciToken.balanceOf(user));
 
@@ -362,7 +362,7 @@ contract TestPenaltyPot is BasePenaltyPotTests {
         vinciStaking.stake(extraStake);
 
         assertApproxEqAbs(
-            vinciStaking.getSupplyElegibleForPenaltyPot(),
+            vinciStaking.getSupplyEligibleForPenaltyPot(),
             elegibleSupplyBefore + extraStake,
             vinciStaking.PENALTYPOT_ROUNDING_FACTOR()
         );
@@ -374,13 +374,13 @@ contract TestPenaltyPot is BasePenaltyPotTests {
         vm.prank(user);
         vinciStaking.crossCheckpoint();
 
-        uint256 elegibleSupplyBefore = vinciStaking.getSupplyElegibleForPenaltyPot();
+        uint256 elegibleSupplyBefore = vinciStaking.getSupplyEligibleForPenaltyPot();
 
         unstaked = bound(unstaked, 1, staked);
         vm.prank(user);
         vinciStaking.unstake(unstaked);
 
-        assertApproxEqAbs(vinciStaking.getSupplyElegibleForPenaltyPot(), elegibleSupplyBefore - unstaked, 10);
+        assertApproxEqAbs(vinciStaking.getSupplyEligibleForPenaltyPot(), elegibleSupplyBefore - unstaked, 10);
     }
 
     function testElegibleSupplyReducesToZeroWhenEveryoneUnstakes() public {
@@ -397,7 +397,7 @@ contract TestPenaltyPot is BasePenaltyPotTests {
         vinciStaking.unstake(vinciStaking.activeStaking(user));
         vm.stopPrank();
 
-        assertEq(vinciStaking.getSupplyElegibleForPenaltyPot(), 0);
+        assertEq(vinciStaking.getSupplyEligibleForPenaltyPot(), 0);
     }
 
     function testDistributionWithNoSupply() public {
@@ -434,7 +434,7 @@ contract TestPenaltyPot is BasePenaltyPotTests {
         vinciStaking.unstake(1 * amount);
 
         assertGt(vinciStaking.penaltyPot(), 0);
-        assertGt(vinciStaking.getSupplyElegibleForPenaltyPot(), 0);
+        assertGt(vinciStaking.getSupplyEligibleForPenaltyPot(), 0);
         assertEq(vinciStaking.getUnclaimableFromPenaltyPot(alice), 0);
         assertEq(vinciStaking.getUnclaimableFromPenaltyPot(bob), 0);
         assertEq(vinciStaking.getUnclaimableFromPenaltyPot(pepe), 0);
@@ -513,7 +513,7 @@ contract TestPenaltyPot is BasePenaltyPotTests {
         // this amount will go back to the user if still has some staked and keeps status of superuser
         uint256 stillStaked = staked - unstakeAmount;
         uint256 shareThatGoesBackToUser =
-            estimatedPenalty * stillStaked / (vinciStaking.getSupplyElegibleForPenaltyPot() - unstakeAmount);
+            estimatedPenalty * stillStaked / (vinciStaking.getSupplyEligibleForPenaltyPot() - unstakeAmount);
 
         vm.prank(user);
         vinciStaking.unstake(unstakeAmount);
@@ -542,7 +542,7 @@ contract TestPenaltyPot is BasePenaltyPotTests {
         vinciStaking.crossCheckpoint();
         vm.prank(pepe);
         vinciStaking.crossCheckpoint();
-        assertGt(vinciStaking.getSupplyElegibleForPenaltyPot(), 0);
+        assertGt(vinciStaking.getSupplyEligibleForPenaltyPot(), 0);
 
         skip(37 days);
         uint256 staked = vinciStaking.activeStaking(user);
@@ -578,7 +578,7 @@ contract TestPenaltyPot is BasePenaltyPotTests {
         vinciStaking.crossCheckpoint();
         vm.prank(pepe);
         vinciStaking.crossCheckpoint();
-        assertGt(vinciStaking.getSupplyElegibleForPenaltyPot(), 0);
+        assertGt(vinciStaking.getSupplyEligibleForPenaltyPot(), 0);
 
         skip(37 days);
         uint256 staked = vinciStaking.activeStaking(user);

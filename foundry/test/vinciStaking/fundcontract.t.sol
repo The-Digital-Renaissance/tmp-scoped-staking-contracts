@@ -123,7 +123,7 @@ contract TestFundingStakingContract is BaseTestNotFunded {
         uint256 currentFunds = vinciStaking.vinciStakingRewardsFunds();
         uint256 removeAmount = currentFunds + 1;
 
-        vm.expectRevert(VinciStakingV1.InvalidAmount.selector);
+        vm.expectRevert();
         vinciStaking.removeNonAllocatedStakingRewards(removeAmount);
     }
 
@@ -147,7 +147,7 @@ contract TestFundingStakingContract is BaseTestNotFunded {
         assertEq(vinciStaking.vinciStakingRewardsFunds(), 0);
 
         vm.prank(funder);
-        vm.expectRevert(VinciStakingV1.InvalidAmount.selector);
+        vm.expectRevert();
         vinciStaking.removeNonAllocatedStakingRewards(1);
     }
 

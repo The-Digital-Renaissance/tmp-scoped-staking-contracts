@@ -2,7 +2,6 @@
 pragma solidity >=0.8.9 <0.9.0;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/access/AccessControl.sol";
 
 //                          &&&&&%%%%%%%%%%#########*
@@ -35,8 +34,8 @@ contract Vinci is ERC20, AccessControl {
     bytes32 public constant CONTRACT_OPERATOR_ROLE = keccak256("CONTRACT_OPERATOR_ROLE");
 
     // to be able to pack the Timelocks in a gas efficient way, we took some assumptions.
-    // uint64.max is equivalent to year 2550, so we are far from reaching that
-    // amount is very far away from reaching uint128.max
+    // uint64.max is equivalent to year 584,942,417,355, so we are far from reaching that
+    // amount is very far away from reaching uint160.max
     struct TimeLock {
         uint160 amount;
         uint64 releaseTime;
@@ -51,13 +50,14 @@ contract Vinci is ERC20, AccessControl {
     constructor() ERC20("Vinci", "VINCI") {
         _mint(address(this), 200 * 500 * 10 ** 6 * 10 ** 18);
         freeSupply = totalSupply();
-        _setupRole(DEFAULT_ADMIN_ROLE, msg.sender);
-        _setupRole(CONTRACT_OPERATOR_ROLE, msg.sender);
+        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        _grantRole(CONTRACT_OPERATOR_ROLE, msg.sender);
     }
 
     error InvalidAddress();
     error InvalidVestingSchedule();
     error ExceedsMaxVeestingsPerWallet();
+    error NothingToClaim();
 
     event TokensLocked(address indexed beneficiary, uint256 amount, uint256 releaseTime);
     event TokensClaimed(address indexed beneficiary, uint256 amount, uint256 releaseTime);
@@ -81,9 +81,10 @@ contract Vinci is ERC20, AccessControl {
 
         // this saves gas
         uint256 length = userTimeLocks.length;
+        if (length == 0) revert NothingToClaim();
 
         for (uint256 i = 0; i < length; i++) {
-            TimeLock storage timeLock = userTimeLocks[i];
+            TimeLock memory timeLock = userTimeLocks[i];
 
             if (timeLock.releaseTime <= block.timestamp && !timeLock.claimed) {
                 uint256 amount = timeLock.amount;
@@ -91,7 +92,7 @@ contract Vinci is ERC20, AccessControl {
                 unchecked {
                     total += amount;
                 }
-                timeLock.claimed = true;
+                timeLocks[user][i].claimed = true;
                 emit TokensClaimed(user, amount, timeLock.releaseTime);
             }
         }
@@ -132,7 +133,7 @@ contract Vinci is ERC20, AccessControl {
         uint256 total = 0;
         uint256 length = timeLocks[user].length;
         for (uint256 i = 0; i < length; i++) {
-            if ((timeLocks[user][i].releaseTime <= block.timestamp)) {
+            if (timeLocks[user][i].releaseTime <= block.timestamp) {
                 total += timeLocks[user][i].amount;
             }
         }

@@ -2,7 +2,6 @@
 pragma solidity >=0.8.14 <0.9.0;
 
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import "./inheritables/tiers.sol";
@@ -88,8 +87,6 @@ contract VinciStakingV1 is AccessControl, TierManager, Checkpoints, PenaltyPot {
     error CantRelockBeforeCrossingCheckpoint();
     error CheckpointHasToBeCrossedFirst();
 
-    // the following mappings are a waste of gas as they are only used for front-end views
-    // but they were requested by upper management, and the low gas in polygon make them affordable
     // Aggregation of all VINCI staked in the contract by all stakers
     uint256 public totalVinciStaked;
 
@@ -102,18 +99,18 @@ contract VinciStakingV1 is AccessControl, TierManager, Checkpoints, PenaltyPot {
         vinciToken = IERC20(_vinciTokenAddress);
 
         // note that the deployer of the contract is automatically granted the DEFAULT_ADMIN_ROLE but not CONTRACT_FUNDER_ROLE
-        _setupRole(DEFAULT_ADMIN_ROLE, msg.sender);
-        _setupRole(CONTRACT_OPERATOR_ROLE, msg.sender);
+        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        _grantRole(CONTRACT_OPERATOR_ROLE, msg.sender);
     }
 
     /// ================== User functions =============================
 
-    /// @dev    See IVinciStaking for specifications
+    /// @dev Stake VINCI tokens to the contract
     function stake(uint256 amount) external {
         _stake(msg.sender, amount);
     }
 
-    /// @dev    See IVinciStaking for specifications
+    /// @dev Contract operator can stake tokens on behalf of users
     function batchStakeTo(address[] calldata users, uint256[] calldata amounts)
         external
         onlyRole(CONTRACT_OPERATOR_ROLE)
@@ -127,12 +124,13 @@ contract VinciStakingV1 is AccessControl, TierManager, Checkpoints, PenaltyPot {
         }
     }
 
+    /// @dev Unstake VINCI tokens from the contract
     function unstake(uint256 amount) external {
         if (amount == 0) revert InvalidAmount();
         // unstaking has a high cost in this echosystem:
         // - loosing already earned staking rewards,
-        // - being downgrading in tier
-        // - a lockup of 2 weeks before the unstaked can be completed
+        // - being downgraded in tier
+        // - a lockup of 2 weeks before the unstake can be completed
         // - potentially losing your staking streak if too much is unstaked
         address sender = msg.sender;
         // when unstaking, a percentage of the rewards, proportional to the current stake will be withdrawn as a penalty
@@ -140,7 +138,7 @@ contract VinciStakingV1 is AccessControl, TierManager, Checkpoints, PenaltyPot {
         // This penalty is distributed to the penalty pot
         uint256 stakedBefore = activeStaking[sender];
         if (amount > stakedBefore) revert NotEnoughStakingBalance();
-        // force users to cross checkpotint if timestamp allows it to avoid undesired contract states
+        // force users to cross checkpoint if timestamp allows it to avoid undesired contract states
         uint256 _checkpoint = checkpoint[sender];
         if (block.timestamp > _checkpoint) revert CheckpointHasToBeCrossedFirst();
         uint256 _userFullPeriodRewards = fullPeriodAprRewards[sender];
@@ -168,9 +166,9 @@ contract VinciStakingV1 is AccessControl, TierManager, Checkpoints, PenaltyPot {
         uint256 totalPenalization = penaltyToEarnedRewards + penaltyToAirdrops + penaltyToPenaltyPot;
 
         if (_isSuperstaker(sender)) {
-            // we only reduce the amount elegible for penaltyPotRewards if already a superstaker
+            // we only reduce the amount eligible for penaltyPotRewards if already a superstaker
             // no need to _bufferPenaltyPot here, as it is already done by _penalizePenaltyPotShare() above
-            _removeFromElegibleSupplyForPenaltyPot(amount);
+            _removeFromEligibleSupplyForPenaltyPot(amount);
         }
 
         // It is OK that the penalized user also gets back a small fraction of its own penalty.
@@ -223,12 +221,15 @@ contract VinciStakingV1 is AccessControl, TierManager, Checkpoints, PenaltyPot {
         uint256 amount = currentlyUnstakingBalance[sender];
         if (amount == 0) revert NothingToWithdraw();
 
+        // delele storage variables to get gas refund
         delete currentlyUnstakingBalance[sender];
+        delete unstakingReleaseTime[sender];
         emit UnstakingCompleted(sender, amount);
         _sendVinci(sender, amount);
     }
 
-    /// @dev    See IVinciStaking for specifications
+    /// @notice Function to relock the stake, which will reevaluate tier and postpone the checkpoint by the same amount
+    ///         of months as the current period
     function relock() external {
         address sender = msg.sender;
         if (!_existingUser(sender)) revert NonExistingStaker();
@@ -238,11 +239,11 @@ contract VinciStakingV1 is AccessControl, TierManager, Checkpoints, PenaltyPot {
         uint256 previousNextCheckpoint = checkpoint[sender];
 
         _setTier(sender, _calculateTier(staked));
-        _postponeCheckpointFromCurrentTimestamp(sender);
+        uint newCheckpoint = _postponeCheckpointFromCurrentTimestamp(sender);
 
         // extend the baseAprBalanceNextCP with the length from current next checkpoint until new next checkpoint
         // if checkpoing[sender] < previousNextCheckpoint, tx would revert above due to _canCrossCheckpoint() = true
-        uint256 extraRewards = _estimatePeriodRewards(staked, checkpoint[sender] - previousNextCheckpoint);
+        uint256 extraRewards = _estimatePeriodRewards(staked, newCheckpoint - previousNextCheckpoint);
         uint256 currentFunds = vinciStakingRewardsFunds;
         if (extraRewards > currentFunds) {
             emit MissedRewardsAllocation(sender, extraRewards, currentFunds);
@@ -312,7 +313,6 @@ contract VinciStakingV1 is AccessControl, TierManager, Checkpoints, PenaltyPot {
     }
 
     function removeNonAllocatedStakingRewards(uint256 amount) external onlyRole(CONTRACT_FUNDER_ROLE) {
-        if (amount > vinciStakingRewardsFunds) revert InvalidAmount();
         vinciStakingRewardsFunds -= amount;
         emit NonAllocatedStakingRewardsFundsRetrieved(msg.sender, amount);
         _sendVinci(msg.sender, amount);
@@ -356,9 +356,9 @@ contract VinciStakingV1 is AccessControl, TierManager, Checkpoints, PenaltyPot {
         return _estimateUserShareOfPenaltyPot(user, activeStaking[user]);
     }
 
-    /// @notice Returns the current supply elegible for penalty pot rewards
-    function getSupplyElegibleForPenaltyPot() external view returns (uint256) {
-        return _getSupplyElegibleForAllocation();
+    /// @notice Returns the current supply eligible for penalty pot rewards
+    function getSupplyEligibleForPenaltyPot() external view returns (uint256) {
+        return _getSupplyEligibleForAllocation();
     }
 
     /// @notice When a user unstakes, those tokens are locked for 15 days, not earning rewards. Once the lockup period
@@ -426,6 +426,10 @@ contract VinciStakingV1 is AccessControl, TierManager, Checkpoints, PenaltyPot {
         _updateTierThresholds(tierThresholds);
     }
 
+    function getUserTier(address user) external view returns (uint256) {
+        return _getUserTier(user);
+    }
+
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     /// INTERNAL FUNCTIONS
 
@@ -441,15 +445,15 @@ contract VinciStakingV1 is AccessControl, TierManager, Checkpoints, PenaltyPot {
         } else if (_canCrossCheckpoint(user)) {
             revert CheckpointHasToBeCrossedFirst();
         } else if (_isSuperstaker(user)) {
-            // no need to track the supplyElegibleForPenaltyPot specific of a user, because that is exactly the activeStaking
+            // no need to track the supplyEligibleForPenaltyPot specific of a user, because that is exactly the activeStaking
             // We only need to buffer any penalty pot earned so far, before changing the activeStaking
             _bufferPenaltyPotAllocation(user, stakingBalance);
             // This addition is not specific for the user, but for the entire penalty pot supply
-            _addToElegibleSupplyForPenaltyPot(amount);
+            _addToEligibleSupplyForPenaltyPot(amount);
         }
 
-        // we save the rewards for the entire period since now until next checkpoint here because the will only be
-        // unlocked in the enxt checkpoint anyways
+        // we save the rewards for the entire period since now until next checkpoint here because they will only be
+        // unlocked in the next checkpoint anyways
         uint256 rewards = _estimatePeriodRewards(amount, checkpoint[user] - block.timestamp);
         uint256 availableFunds = vinciStakingRewardsFunds;
         if (rewards > availableFunds) {
@@ -482,7 +486,7 @@ contract VinciStakingV1 is AccessControl, TierManager, Checkpoints, PenaltyPot {
         // user will automatically become superStaker after the call to _postponeCheckpoint()
         if (!_isSuperstaker(user)) {
             _bufferPenaltyPotAllocation(user, 0);
-            _addToElegibleSupplyForPenaltyPot(activeStake);
+            _addToEligibleSupplyForPenaltyPot(activeStake);
         }
 
         // we store newCheckpoint in memory to avoid reading it in the rest of this function (to save gas)
@@ -536,8 +540,6 @@ contract VinciStakingV1 is AccessControl, TierManager, Checkpoints, PenaltyPot {
         vinciToken.safeTransfer(to, amount);
     }
 
-    function _initializeStakeholder(address user, uint256 stakeAmount) internal {}
-
     //////////////////////////////////////////////////////////////////////////////////////////////
     /// Internal view/pure functions
 
@@ -548,7 +550,7 @@ contract VinciStakingV1 is AccessControl, TierManager, Checkpoints, PenaltyPot {
 
     /// A user checkpoint=0 until the user is registered and it is set back to zero when is _finalized
     function _existingUser(address _user) internal view returns (bool) {
-        return checkpoint[_user] > 0;
+        return (checkpoint[_user] > 0) && (_user != address(0));
     }
 
     function _getCurrentUnclaimableRewardsFromBaseAPR(
@@ -565,8 +567,7 @@ contract VinciStakingV1 is AccessControl, TierManager, Checkpoints, PenaltyPot {
         if (_checkpoint <= block.timestamp) return _userFullPeriodRewards;
         // block.timestamp is always < checkpoint[user] because otherwise it could cross checkpoint
         uint256 futureRewards = _estimatePeriodRewards(stakingBalance, _checkpoint - block.timestamp);
-        uint256 fullperiodRewards = _userFullPeriodRewards;
         // this subtraction can underflow due to rounding issues in _estimatePeriodRewards()
-        return futureRewards > fullperiodRewards ? 0 : fullperiodRewards - futureRewards;
+        return futureRewards > _userFullPeriodRewards ? 0 : _userFullPeriodRewards - futureRewards;
     }
 }

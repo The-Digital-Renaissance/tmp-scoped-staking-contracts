@@ -172,9 +172,9 @@ contract UserStakingTests is BaseTestFunded {
         vinciStaking.crossCheckpoint();
         assert(vinciStaking.isSuperstaker(user));
 
-        uint256 ppotSupplyBefore = vinciStaking.getSupplyElegibleForPenaltyPot();
+        uint256 ppotSupplyBefore = vinciStaking.getSupplyEligibleForPenaltyPot();
         vinciStaking.stake(amount);
-        assertEq(vinciStaking.getSupplyElegibleForPenaltyPot(), ppotSupplyBefore + amount);
+        assertEq(vinciStaking.getSupplyEligibleForPenaltyPot(), ppotSupplyBefore + amount);
     }
 
     function testStakeAddsToPpotElegibleSupplyTinyDecimals() public {
@@ -186,9 +186,9 @@ contract UserStakingTests is BaseTestFunded {
         vinciStaking.crossCheckpoint();
         assert(vinciStaking.isSuperstaker(user));
 
-        uint256 ppotSupplyBefore = vinciStaking.getSupplyElegibleForPenaltyPot();
+        uint256 ppotSupplyBefore = vinciStaking.getSupplyEligibleForPenaltyPot();
         vinciStaking.stake(amount);
-        assertApproxEqAbs(vinciStaking.getSupplyElegibleForPenaltyPot(), ppotSupplyBefore + amount, 10 ** 6);
+        assertApproxEqAbs(vinciStaking.getSupplyEligibleForPenaltyPot(), ppotSupplyBefore + amount, 10 ** 6);
     }
 
     function stakedForbiddenIdCheckpointNotCrossed() public {

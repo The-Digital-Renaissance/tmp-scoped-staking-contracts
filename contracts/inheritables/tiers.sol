@@ -19,6 +19,8 @@ contract TierManager is AccessControl {
     event TiersThresholdsUpdated(uint128[] vinciThresholds);
     event TierSet(address indexed user, uint256 newTier);
 
+    error NoTiersSet();
+
     constructor(uint128[] memory _tierThresholdsInVinci) {
         _updateTierThresholds(_tierThresholdsInVinci);
     }
@@ -40,7 +42,7 @@ contract TierManager is AccessControl {
 
     /// @notice Returns the potential tier for a given `balance` of VINCI tokens if evaluated now
     function _calculateTier(uint256 vinciAmount) internal view returns (uint256 _tier) {
-        if (thresholds.length == 0) revert("no tiers set");
+        if (thresholds.length == 0) revert NoTiersSet();
         if (vinciAmount == 0) return 0;
 
         uint256 numberOfTiers = thresholds.length;
@@ -51,6 +53,15 @@ contract TierManager is AccessControl {
             tier += 1;
         }
         return tier;
+    }
+
+    /// @notice Returns the current tier for a given user. It manages the edge case in which a user has the top tier,
+    ///         and later the number of tiers is reduced. In this case the user should get the top tier. However, if
+    ///         the number of tiers is increased again, it should get back the old tier
+    function _getUserTier(address _user) internal view returns (uint256) {
+        uint256 _tier = userTier[_user];
+        uint256 nTiers = _numberOfTiers();
+        return _tier > nTiers ? nTiers : _tier;
     }
 
     ////////////////////////////////////////////////////////////////////////////////////////////////
@@ -67,9 +78,7 @@ contract TierManager is AccessControl {
 
     // @dev Sets the tier for a given user
     function _setTier(address _user, uint256 _newTier) internal {
-        if (_newTier != userTier[_user]) {
-            userTier[_user] = _newTier;
-            emit TierSet(_user, _newTier);
-        }
+        userTier[_user] = _newTier;
+        emit TierSet(_user, _newTier);
     }
 }

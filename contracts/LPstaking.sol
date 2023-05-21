@@ -32,7 +32,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 /**
  * @title  Simple staking pool for LP tokens
  * @author VINCI
- * @notice This contract is meant to be used to incentive liquidity provision by distributing Vinci.
+ * @notice This contract is meant to be used to incentivise liquidity provision by distributing Vinci.
  */
 contract VinciLPStaking is AccessControl {
     bytes32 public constant CONTRACT_OPERATOR_ROLE = keccak256("CONTRACT_OPERATOR_ROLE");
@@ -59,14 +59,14 @@ contract VinciLPStaking is AccessControl {
     // Vinci comes with all decimals, while LP does not
     uint256 public LPpriceInVinci;
 
-    // stakings of each user are stored as a list of Stake[] structs
+    // stakings of each user are stored as an array of Stake structs
     mapping(address => Stake[]) public stakes;
 
     /// Remaining VINCI tokens used exclusively for staking rewards
     uint256 public fundsForStakingRewards;
     uint256 public fundsForInstantPayouts;
 
-    /// total staked LP contracts in the contract. This is used everytime the distributeAPR() is called (weekly)
+    /// total staked LP tokens in the contract. This is used everytime the distributeAPR() is called (weekly)
     uint256 public totalStakedLPTokens;
     // number of APR distributions. We keep track of this in case we miss a week, that rewards are not lost
     uint256 internal numberOfDistributionsCompleted;
@@ -77,11 +77,6 @@ contract VinciLPStaking is AccessControl {
     // This will be constantly updated every time the APR is distributed
     // Deppending on the number of months locked, the rewards will be split differently between weekly and final payouts
     uint256 vinciRewardsPerLP;
-    // the constructor will set these values. But for each number of months, the sum of weekly and final should be 100%
-    mapping(uint256 => uint256) public weeklyMultiplier;
-    mapping(uint256 => uint256) public finalMultiplier;
-    // Depending on the number of months, the instant payout at stake will be different
-    mapping(uint256 => uint256) public instantPayoutMultiplier;
     // Used for all calculations that need percentages and shares (payouts)
     uint256 internal constant BASIS_POINTS = 10000;
 
@@ -114,7 +109,7 @@ contract VinciLPStaking is AccessControl {
     error InsufficientVinciInLPStakingContract();
 
     /**
-     * @dev   Create a new SimpleLPPool
+     * @dev   Create a new VinciLPStaking
      * @param vinciContract The address of the Vinci Contract on this chain
      * @param lpContract    The address of a ERC20 compatible contract used as a staking token. This can be a LP token.
      */
@@ -123,29 +118,15 @@ contract VinciLPStaking is AccessControl {
         lpToken = lpContract;
 
         // initially the deployer has both roles
-        _setupRole(DEFAULT_ADMIN_ROLE, _msgSender());
-        _setupRole(CONTRACT_OPERATOR_ROLE, _msgSender());
-
-        // nmonths=4 --> all APR given at the end
-        weeklyMultiplier[4] = 0;
-        finalMultiplier[4] = 10000;
-        // nmonths=12 --> 50% APR given on a weekly basis, 50% at the end
-        weeklyMultiplier[8] = 5000;
-        finalMultiplier[8] = 5000;
-        // nmonths=12 --> all APR given on a weekly basis
-        weeklyMultiplier[12] = 10000;
-        finalMultiplier[12] = 0;
-
-        instantPayoutMultiplier[4] = 50; // == 0.5%
-        instantPayoutMultiplier[8] = 150; // == 1.5%
-        instantPayoutMultiplier[12] = 500; // == 5%
+        _setupRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        _setupRole(CONTRACT_OPERATOR_ROLE, msg.sender);
     }
 
     // @notice Create a new stake with `monthsLocked` months that is supposed to be locked.
     function newStake(uint256 amount, uint64 monthsLocked) external {
         if ((monthsLocked != 4) && (monthsLocked != 8) && (monthsLocked != 12)) revert UnsupportedNumberOfMonths();
         if (amount == 0) revert InvalidAmount();
-        address sender = _msgSender();
+        address sender = msg.sender;
 
         // monthsLocked is already capped by uint64 so should be safe of overloads
         uint128 releaseTime = uint64(block.timestamp) + (30 days * monthsLocked);
@@ -158,7 +139,7 @@ contract VinciLPStaking is AccessControl {
         totalStakedLPTokens += amount;
 
         // For low amount of LP tokens this Division will return 0 due to lack of decimals in solidity. No payout
-        uint256 vinciInstantPayout = (amount * LPpriceInVinci * instantPayoutMultiplier[monthsLocked])
+        uint256 vinciInstantPayout = (amount * LPpriceInVinci * _instantPayoutMultiplier(monthsLocked))
             / (10 ** lpToken.decimals() * BASIS_POINTS);
 
         if (vinciInstantPayout > fundsForInstantPayouts) {
@@ -181,7 +162,6 @@ contract VinciLPStaking is AccessControl {
     /// @notice Claim staking rewards from a stake. Each stake has to be claimed separately
     function claimRewards(uint256 stakeIndex) external {
         address sender = msg.sender;
-        if (stakeIndex > stakes[sender].length - 1) revert NonExistingIndex();
         if (stakes[sender][stakeIndex].withdrawn) revert AlreadyWithdrawnIndex();
 
         uint256 claimableNow = _getCurrentClaimable(sender, stakeIndex);
@@ -200,7 +180,7 @@ contract VinciLPStaking is AccessControl {
 
     /// @notice Withdraw a staked amount after the lock time has expired
     function withdrawStake(uint256 stakeIndex) external {
-        address sender = _msgSender();
+        address sender = msg.sender;
 
         if (stakeIndex > stakes[sender].length - 1) revert NonExistingIndex();
         if (stakes[sender][stakeIndex].withdrawn) revert AlreadyWithdrawnIndex();
@@ -219,18 +199,19 @@ contract VinciLPStaking is AccessControl {
         emit Unstaked(sender, stakedLPAmount);
         lpToken.safeTransfer(sender, stakedLPAmount);
 
-        // The event needs to come after _sendVinci because the later corrects for missing funds and missed payouts
-        _sendStakingRewards(sender, missingClaims);
+        if (missingClaims > 0) {
+            _sendStakingRewards(sender, missingClaims);
+        }
         emit NonClaimedRewardsReceived(sender, missingClaims);
     }
 
     ////////////////////////////////////////////////////////////////////////////////////
     // Management functions
 
-    // @notice Set the amount of vinci equivalent to an LP token.
-    //         Decimals need to be the decimals of the Vinci Token.
-    //         I.e. If the price of an LP is 0.2 VINCI,
-    //         the amount to input should be 0.2 * (10 ** <decimals of Vinci>).
+    /// @notice Set the amount of vinci equivalent to an LP token.
+    ///         Decimals need to be the decimals of the Vinci Token.
+    ///         I.e. If the price of an LP is 0.2 VINCI,
+    ///         the amount to input should be 0.2 * (10 ** <decimals of Vinci>).
     function setLPPriceInVinci(uint256 _newPrice) external onlyRole(CONTRACT_OPERATOR_ROLE) {
         LPpriceInVinci = _newPrice;
     }
@@ -320,7 +301,7 @@ contract VinciLPStaking is AccessControl {
     /// @dev    If the stake has been already withdrawn, it returns 0
     function readFinalPayout(address staker, uint256 stakeIndex) external view returns (uint256) {
         if (stakes[staker][stakeIndex].withdrawn) return 0;
-        return finalMultiplier[stakes[staker][stakeIndex].monthsLocked] * stakes[staker][stakeIndex].amount
+        return _finalMultiplier(stakes[staker][stakeIndex].monthsLocked) * stakes[staker][stakeIndex].amount
             * (vinciRewardsPerLP - stakes[staker][stakeIndex].claimedFinalVinciRewardsPerLP) / BASIS_POINTS;
     }
 
@@ -358,21 +339,22 @@ contract VinciLPStaking is AccessControl {
     // internal functions
 
     function _getCurrentClaimable(address staker, uint256 stakeIndex) internal view returns (uint256) {
-        if (stakes[staker][stakeIndex].withdrawn) {
-            return 0;
-        }
         // save stake in memory to save gas
         Stake memory stake = stakes[staker][stakeIndex];
 
+        if (stake.withdrawn) {
+            return 0;
+        }
+
         uint256 claimable;
-        if (weeklyMultiplier[stake.monthsLocked] > 0) {
+        if (_weeklyMultiplier(stake.monthsLocked) > 0) {
             claimable += stake.amount * (vinciRewardsPerLP - stake.claimedWeeklyVinciRewardsPerLP)
-                * weeklyMultiplier[stake.monthsLocked] / BASIS_POINTS;
+                * _weeklyMultiplier(stake.monthsLocked) / BASIS_POINTS;
         }
         // if the stake is unlocked, the final payout is also claimable
-        if ((finalMultiplier[stake.monthsLocked] > 0) && (stake.releaseTime < block.timestamp)) {
+        if ((_finalMultiplier(stake.monthsLocked) > 0) && (stake.releaseTime < block.timestamp)) {
             claimable += stake.amount * (vinciRewardsPerLP - stake.claimedFinalVinciRewardsPerLP)
-                * finalMultiplier[stake.monthsLocked] / BASIS_POINTS;
+                * _finalMultiplier(stake.monthsLocked) / BASIS_POINTS;
         }
         return claimable;
     }
@@ -381,5 +363,47 @@ contract VinciLPStaking is AccessControl {
         // There should always be enough funds to pay the rewards, because the distributeAPR function only distributes
         // if there are funds available
         vinciToken.safeTransfer(to, amount);
+    }
+
+    function _instantPayoutMultiplier(uint256 monthsLocked) internal pure returns (uint256) {
+        // hardcoded these values to save gas
+        if (monthsLocked == 4) {
+            // 0.5 %
+            return 50;
+        } else if (monthsLocked == 8) {
+            // 1.5 %
+            return 150;
+        } else {
+            // 5 %
+            return 500;
+        }
+    }
+
+    function _weeklyMultiplier(uint256 monthsLocked) internal pure returns (uint256) {
+        // hardcoded these values to save gas
+        if (monthsLocked == 4) {
+            // nmonths=4 --> all APR given at the end
+            return 0;
+        } else if (monthsLocked == 8) {
+            // nmonths=8 --> 50% APR given on a weekly basis, 50% at the end
+            return 5000;
+        } else {
+            // nmonths=12 --> all APR given on a weekly basis
+            return 10000;
+        }
+    }
+
+    function _finalMultiplier(uint256 monthsLocked) internal pure returns (uint256) {
+        // hardcoded these values to save gas
+        if (monthsLocked == 4) {
+            // nmonths=4 --> all APR given at the end
+            return 10000;
+        } else if (monthsLocked == 8) {
+            // nmonths=8 --> 50% APR given on a weekly basis, 50% at the end
+            return 5000;
+        } else {
+            // nmonths=12 --> all APR given on a weekly basis
+            return 0;
+        }
     }
 }
